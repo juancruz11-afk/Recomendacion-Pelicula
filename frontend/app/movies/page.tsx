@@ -1,7 +1,7 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 
 // Definimos la estructura exacta que devuelve nuestro backend mejorado
 type Movie = {
@@ -9,13 +9,14 @@ type Movie = {
   title: string
   genres: string
   score: number
-  poster_url: string   // Corregido: antes era 'poster'
+  poster_url: string
   tmdb_id: number | null
-  watch_link: string   // Nuevo: el enlace para ver la película
-  overview: string     // Nuevo: descripción de la película
+  watch_link: string
+  overview: string
 }
 
-export default function MoviesPage() {
+// 1. Creamos un componente interno con la lógica (Este NO se exporta por defecto)
+function MoviesContent() {
   const searchParams = useSearchParams()
   const query = searchParams.get('title')
 
@@ -28,7 +29,7 @@ export default function MoviesPage() {
     setLoading(true)
 
     // Llamada al backend
-    fetch(`http://recomendador-pelicula-s4p8.onrender.com/recommend/text?q=${encodeURIComponent(query)}`)
+    fetch(`https://recomendador-pelicula-s4p8.onrender.com/recommend/text?q=${encodeURIComponent(query)}`)
       .then(res => res.json())
       .then(data => {
         setMovies(data)
@@ -120,5 +121,14 @@ export default function MoviesPage() {
         ))}
       </div>
     </main>
+  )
+}
+
+// 2. Exportamos el componente contenedor con Suspense
+export default function MoviesPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-black text-white p-10">Cargando buscador...</div>}>
+      <MoviesContent />
+    </Suspense>
   )
 }
