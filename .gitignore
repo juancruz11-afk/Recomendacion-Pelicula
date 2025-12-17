@@ -1,0 +1,4 @@
+.env
+backend/recomendacion/.env
+__pycache__/
+*.pyc
