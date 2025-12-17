@@ -1,33 +1,48 @@
 # backend/recomendacion/recomendador.py
-from model import NLPModel
-from sklearn.metrics.pairwise import cosine_similarity
+import os
+import pickle
 import pandas as pd
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from model import NLPModel
 from posters import PosterFetcher
-from tmdb import get_watch_providers # Importamos la función de proveedores
+from tmdb import get_watch_providers 
 
 class Recomendador:
     def __init__(self):
-        # Cargamos los datos
-        self.movies = pd.read_csv("data/movies_enriched.csv")
+        # 1. Cargar CSV (Intenta cargar el enriquecido, si no el normal)
+        if os.path.exists("data/movies_enriched.csv"):
+            self.movies = pd.read_csv("data/movies_enriched.csv")
+        else:
+            # Fallback por si no encuentra el enriquecido
+            self.movies = pd.read_csv("data/movies.csv")
+            if "overview" not in self.movies.columns:
+                self.movies["overview"] = ""
+
         self.nlp = NLPModel()
         self.poster_fetcher = PosterFetcher()
 
-        # Preparamos el texto para la búsqueda semántica.
-        # NOTA: Para mejorar la búsqueda por "descripción", idealmente 
-        # deberías tener una columna 'overview' en tu CSV y sumarla aquí.
+        # Preparamos el texto (Aunque carguemos embeddings, es bueno tener la columna lista)
         self.movies["semantic_text"] = (
             self.movies["title"].fillna("") + " " +
-            self.movies["genres"].fillna("").str.replace("|", " ") + " " +  # <--- ¡AGREGUE ESTE + !
-            self.movies["overview"].fillna("") # <--- ¡Esto es la clave!
+            self.movies["genres"].fillna("").str.replace("|", " ") + " " +
+            self.movies["overview"].fillna("")
         )
 
-        # Generamos los embeddings (esto tarda un poco al iniciar)
-        print("Generando embeddings de películas...")
-        self.movie_embeddings = self.nlp.encode(
-            self.movies["semantic_text"].tolist()
-        )
-        print("Embeddings listos.")
+        # 2. CARGA OPTIMIZADA DE EMBEDDINGS (Solución al error de memoria)
+        pkl_path = "data/movie_embeddings.pkl"
+        
+        if os.path.exists(pkl_path):
+            print("⚡ Cargando embeddings pre-calculados (Modo Rápido)...")
+            with open(pkl_path, "rb") as f:
+                self.movie_embeddings = pickle.load(f)
+        else:
+            print("⚠️ ADVERTENCIA: Calculando embeddings en vivo. Esto puede consumir mucha RAM.")
+            self.movie_embeddings = self.nlp.encode(
+                self.movies["semantic_text"].tolist()
+            )
+        
+        print("Sistema listo.")
 
     def recomendar_por_texto(self, query, n=5):
         # 1. Convertir la consulta del usuario a números (embedding)
@@ -47,17 +62,21 @@ class Recomendador:
             row = self.movies.iloc[i]
             title = row["title"]
             
-            # A. Obtener datos visuales e ID de TMDB
+            # A. Obtener datos visuales e ID de TMDB (Posters.py)
             movie_data = self.poster_fetcher.get_movie_data(title)
             tmdb_id = movie_data["tmdb_id"]
             
-            # B. Obtener enlace de "dónde ver" si tenemos ID
+            # B. Obtener enlace de "dónde ver" si tenemos ID (Tmdb.py)
             watch_link = ""
-            providers_info = {}
             if tmdb_id:
-                # Busca proveedores en México ('MX'). Cambia 'ES' o 'US' según necesites.
+                # Busca proveedores en México ('MX').
                 providers_info = get_watch_providers(tmdb_id, country='MX')
-                watch_link = providers_info.get('link', '') # Enlace directo a TMDB Watch
+                watch_link = providers_info.get('link', '') 
+
+            # C. Priorizar la descripción del CSV si existe, sino usar la de TMDB
+            overview = row.get("overview")
+            if pd.isna(overview) or overview == "":
+                overview = movie_data.get("overview", "")
 
             results.append({
                 "movieId": int(row["movieId"]),
@@ -66,8 +85,8 @@ class Recomendador:
                 "score": float(similarities[i]),
                 "poster_url": movie_data["poster_url"],
                 "tmdb_id": tmdb_id,
-                "watch_link": watch_link, # <--- Aquí está tu redirección
-                "overview": movie_data.get("overview") # Útil para mostrar descripción en el frontend
+                "watch_link": watch_link,
+                "overview": overview
             })
 
         return results
